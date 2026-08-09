@@ -14,29 +14,63 @@
         private $lang;
         private $iterations = [];
 
+    private $langAliases = [
+        'bg' => 'bulgarian',
+        'zh' => 'chinese',
+        'cs' => 'czech',
+        'da' => 'danish',
+        'en' => 'english',
+        'fi' => 'finnish',
+        'fr' => 'francais-utf8',
+        'de' => 'german',
+        'he' => 'hebrew',
+        'it' => 'italian',
+        'jp' => 'japanese-utf8',
+        'nl' => 'nederlands-utf8',
+        'no' => 'norsk',
+        'fa' => 'persian',
+        'pl' => 'polish-utf8',
+        'pt' => 'portuguese-br-utf8',
+        'ru' => 'russian-UTF8',
+        'es' => 'spanish-utf8',
+        'sv' => 'svenska-utf8',
+        'uk' => 'ukrainian'
+    ];
+
         public function __construct($modx, $params = null) {
             $this->modx = $modx;
 
             $this->richeditor  = $modx->getConfig('which_editor');
             $this->browser     = $modx->getConfig('which_browser');
             $this->table       = $modx->getFullTableName('pagebuilder');
-            $this->path        = MODX_BASE_PATH . 'assets/plugins/pagebuilder/config/';
             $this->params      = is_null($params) ? $modx->event->params : $params;
             $this->isBackend   = defined('IN_MANAGER_MODE') && IN_MANAGER_MODE == 'true';
             $this->isTV        = isset($this->params['tv']);
+
+            $this->path = EVO_CORE_PATH . 'custom/pagebuilder/';
 
             if (empty($this->params['id'])) {
                 $this->params['id'] = 0;
             }
 
-            $lang = $modx->getConfig('manager_language');
-            $lang = __DIR__ . '/lang/' . $lang . '.php';
+            $langCode = $modx->getConfig('manager_language');
 
-            if (!is_readable($lang)) {
-                $lang = __DIR__ . '/lang/english.php';
+            if (isset($this->langAliases[$langCode])) {
+                $langCode = $this->langAliases[$langCode];
             }
 
-            $this->lang = include $lang;
+            $files = [
+                __DIR__ . '/lang/' . $langCode . '.php',
+                __DIR__ . '/lang/english.php',
+
+            ];
+
+            foreach ($files as $file) {
+                if (is_readable($file)) {
+                    $this->lang = include $file;
+                    break;
+                }
+            }
         }
 
         /**
@@ -190,8 +224,13 @@
 
             $bladeTemplate = false;
 
-            if ($params['renderTo'] == 'templates' && empty($params['wrapTpl']) && isset($this->containers[ $params['container'] ]['blade_template'])) {
-                $bladeTemplate = $this->containers[ $params['container'] ]['blade_template'];
+            $container = [];
+            if (isset($this->containers[ $params['container'] ])) {
+                $container = $this->containers[ $params['container'] ];
+            }
+
+            if ($params['renderTo'] == 'templates' && empty($params['wrapTpl']) && isset($container['blade_template'])) {
+                $bladeTemplate = $container['blade_template'];
             }
 
             foreach ($this->data as $row) {
@@ -221,13 +260,11 @@
                 $values = $this->prepareData($conf, $row['values']);
 
                 if ($params['renderTo'] == 'structure' || $bladeTemplate) {
-                    $data[] = [
-                        'name'      => $row['config'],
-                        'index'     => $idx,
-                        'iteration' => $idx + 1,
-                        'config'    => $conf,
-                        'data'      => $values,
+                    $values['pb'] = [
+                        'name'   => $row['config'],
+                        'config' => $conf,
                     ];
+                    $data[] = $values;
                 } else if ($params['renderTo'] != 'templates') {
                     $data[] = array_merge($values, ['config' => $config]);
                     continue;
@@ -252,6 +289,8 @@
                 }
             }
 
+            $data = $this->prepareData($container, $data);
+
             if ($params['renderTo'] == 'json') {
                 $data = json_encode($data, JSON_UNESCAPED_UNICODE);
             }
@@ -265,14 +304,10 @@
                     if (!empty($out)) {
                         if (isset($params['wrapTpl'])) {
                             $wrapper = $this->modx->getChunk($params['wrapTpl']);
-                        } else if (isset($this->containers[ $params['container'] ])) {
-                            $container = $this->containers[ $params['container'] ];
-
-                            if (!empty($params['templates']) && isset($container['templates'][ $params['templates'] ]['owner'])) {
-                                $wrapper = $container['templates'][ $params['templates'] ]['owner'];
-                            } else if (!empty($container['templates']['owner'])) {
-                                $wrapper = $container['templates']['owner'];
-                            }
+                        } else if (!empty($params['templates']) && isset($container['templates'][ $params['templates'] ]['owner'])) {
+                            $wrapper = $container['templates'][ $params['templates'] ]['owner'];
+                        } else if (!empty($container['templates']['owner'])) {
+                            $wrapper = $container['templates']['owner'];
                         }
                     }
 
@@ -331,7 +366,14 @@
             }
 
             // load manager lang file for date settings
-            include MODX_MANAGER_PATH . 'includes/lang/' . $this->modx->getConfig('manager_language') . '.inc.php';
+            $langCode = $this->modx->getConfig('manager_language');
+            $_lang = [];
+
+            if (isset($this->langAliases[$langCode])) {
+                include EVO_CORE_PATH . 'lang/' . $langCode . '/global.php';
+            } else {
+                include MODX_MANAGER_PATH . 'includes/lang/' . $langCode . '.inc.php';
+            }
 
             return $this->renderTpl('tpl/form.tpl', [
                 'version'    => self::version,
@@ -468,7 +510,7 @@
 
             if (!isset($this->params['template'])) {
                 if ($docid == $this->modx->documentIdentifier) {
-                    $this->params['template'] = $this->modx->documentObject['template'];
+                    $this->params['template'] = (isset($this->modx->documentObject['template'])) ? $this->modx->documentObject['template'] : 1;
                 } else {
                     $doc = $this->modx->getDocument($docid, 'template', 'all');
                     $this->params['template'] = $doc['template'];
@@ -750,6 +792,7 @@
                 }
 
                 case 'richtext': {
+					$params['layout'] = $field['layout'] ?? 'col-12';
                     if (isset($field['theme']) && !isset($this->themes[ $field['theme'] ]) && in_array($this->richeditor, [ 'TinyMCE4' ])) {
                         $result = $this->modx->invokeEvent('OnRichTextEditorInit', [
                             'editor'  => $this->richeditor,
@@ -776,7 +819,6 @@
                 case 'imageradio':
                 case 'radio': {
                     $params['layout'] = 'vertical';
-
                     if (isset($field['layout']) && in_array($field['layout'], [ 'horizontal', 'vertical' ])) {
                         $params['layout'] = $field['layout'];
                     }
@@ -789,6 +831,7 @@
                 }
 
                 default: {
+					$params['layout'] = $field['layout'] ?? 'col-12';
                     return $this->renderTpl('tpl/field_' . $field['type'] . '.tpl', $params) . $this->trigger('OnPBFieldRender', $params);
                 }
             }
